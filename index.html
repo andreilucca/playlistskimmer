@@ -39,6 +39,11 @@
     white-space:nowrap;align-self:center;padding-left:4px;text-align:right;
   }
   .status-pill.live{color:var(--accent)}
+  .head-right{display:flex;align-items:center;gap:14px}
+  .ver{
+    font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.14em;
+    color:var(--ink-dim);opacity:.7;text-transform:uppercase;
+  }
   .mute-btn{
     background:none;border:0;cursor:pointer;padding:2px 4px;
     font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;
@@ -226,7 +231,10 @@
 <div class="app">
   <div class="head">
     <div class="eyebrow">storytellers.records</div>
-    <button class="mute-btn" id="muteBtn" title="Mute playback">&#128266; sound</button>
+    <div class="head-right">
+      <span class="ver">v3</span>
+      <button class="mute-btn" id="muteBtn" title="Mute playback">&#128266; sound</button>
+    </div>
   </div>
   <h1>Playlist <em>Skimmer</em></h1>
 
@@ -331,8 +339,8 @@
 <script>
 (function(){
   var MAX_QUEUE = 5;
+  var EMBED_OPTS = '&show_teaser=false&visual=false&show_comments=false';
 
-  var widget     = SC.Widget(document.getElementById('sc'));
   var startBtn   = document.getElementById('startBtn');
   var stopBtn    = document.getElementById('stopBtn');
   var muteBtn    = document.getElementById('muteBtn');
@@ -352,16 +360,19 @@
   var loopMaxEl  = document.getElementById('loopMax');
   var logEl      = document.getElementById('log');
 
-  var queue       = [];   // playlist URLs, max 5
-  var qCur        = -1;   // index of active playlist in queue
+  var widget      = null;  // rebuilt from scratch for every playlist — no widget.load()
+  var widgetGen   = 0;     // generation counter: events from torn-down widgets are ignored
+  var queue       = [];    // playlist URLs, max 5
+  var qCur        = -1;    // index of the active playlist
   var running     = false;
   var muted       = false;
   var totalTracks = 0;
-  var loops       = 0;    // full passes of the WHOLE QUEUE (all playlists once = 1 loop)
+  var loops       = 0;     // completed passes of the WHOLE queue
   var timer       = null;
   var raf         = null;
   var startedAt   = 0;
   var loadingQ    = false;
+  var advancing   = false; // latch against double-advance (timer + FINISH racing)
   var playRetry   = null;
 
   // ---- persistence ----
@@ -371,7 +382,7 @@
     if (savedQ){
       queue = JSON.parse(savedQ).slice(0, MAX_QUEUE);
     } else {
-      var legacy = localStorage.getItem('skimmer.playlist'); // migrate old single-playlist key
+      var legacy = localStorage.getItem('skimmer.playlist');
       if (legacy) queue = [legacy];
     }
   } catch(e){ queue = []; }
@@ -390,7 +401,7 @@
   function maxLoops(){
     var v = parseInt(maxLoopsIn.value, 10);
     if (isNaN(v) || v < 0) v = 0;
-    return v; // 0 = infinite (single playlist) / whole queue on repeat (multiple)
+    return v; // 0 = repeat the queue forever
   }
 
   function slugTitle(url){
@@ -402,8 +413,8 @@
   }
 
   function updateStats(){
-    qIdxEl.textContent = qCur >= 0 ? (qCur + 1) : '–';
-    qTotalEl.textContent = queue.length || '–';
+    qIdxEl.textContent = qCur >= 0 ? (qCur + 1) : '\u2013';
+    qTotalEl.textContent = queue.length || '\u2013';
     loopCurEl.textContent = loops;
     var m = maxLoops();
     loopMaxEl.innerHTML = m === 0 ? '/&infin;' : '/' + m;
@@ -414,7 +425,7 @@
     if (queue.length === 0){
       var empty = document.createElement('div');
       empty.className = 'queue-empty';
-      empty.textContent = 'Queue empty — add up to ' + MAX_QUEUE + ' playlists.';
+      empty.textContent = 'Queue empty \u2014 add up to ' + MAX_QUEUE + ' playlists.';
       queueEl.appendChild(empty);
     }
     queue.forEach(function(url, i){
@@ -458,7 +469,7 @@
   }
 
   function applyVolume(){
-    widget.setVolume(muted ? 0 : 100);
+    if (widget) widget.setVolume(muted ? 0 : 100);
   }
 
   function setRunning(on){
@@ -466,13 +477,14 @@
     startBtn.disabled = on || totalTracks === 0;
     stopBtn.disabled = !on;
     if (on){
-      statusEl.textContent = 'playing · ' + seconds() + 's/track';
+      statusEl.textContent = 'playing \u00b7 ' + seconds() + 's/track';
       statusEl.classList.add('live');
     } else {
       statusEl.textContent = 'standby';
       statusEl.classList.remove('live');
       clearTimers();
       cancelPlayRetry();
+      advancing = false;
     }
     renderQueue();
   }
@@ -481,6 +493,10 @@
     if (timer){ clearTimeout(timer); timer = null; }
     if (raf){ cancelAnimationFrame(raf); raf = null; }
     fill.style.transform = 'scaleX(0)';
+  }
+
+  function cancelPlayRetry(){
+    if (playRetry){ clearTimeout(playRetry); playRetry = null; }
   }
 
   function animateStrip(ms){
@@ -493,38 +509,6 @@
     raf = requestAnimationFrame(step);
   }
 
-  function refreshNowPlaying(){
-    widget.getCurrentSoundIndex(function(i){
-      idxEl.textContent = (i + 1);
-      widget.getCurrentSound(function(s){
-        if (s && s.title) titleEl.textContent = s.title;
-      });
-    });
-  }
-
-  function cancelPlayRetry(){
-    if (playRetry){ clearTimeout(playRetry); playRetry = null; }
-  }
-
-  // After widget.load() the iframe reloads and an immediate play() is often
-  // silently ignored. Keep nudging it until playback actually starts.
-  function ensurePlaying(attempt){
-    attempt = attempt || 0;
-    cancelPlayRetry();
-    if (!running) return;
-    widget.isPaused(function(paused){
-      if (!running) return;
-      if (!paused) return; // it's playing — PLAY event will arm the timer
-      if (attempt >= 10){
-        setRunning(false);
-        logEl.textContent = 'Playback would not start automatically — press Start to resume.';
-        return;
-      }
-      widget.play();
-      playRetry = setTimeout(function(){ ensurePlaying(attempt + 1); }, 700);
-    });
-  }
-
   function armTimer(){
     clearTimers();
     if (!running) return;
@@ -533,42 +517,44 @@
     timer = setTimeout(advance, ms);
   }
 
+  function refreshNowPlaying(){
+    if (!widget) return;
+    widget.getCurrentSoundIndex(function(i){
+      idxEl.textContent = (i + 1);
+      widget.getCurrentSound(function(s){
+        if (s && s.title) titleEl.textContent = s.title;
+      });
+    });
+  }
+
+  // Safety net: if the freshly built widget's auto_play does not kick in, nudge it.
+  function ensurePlaying(gen, attempt){
+    attempt = attempt || 0;
+    cancelPlayRetry();
+    if (!running || gen !== widgetGen || !widget) return;
+    widget.isPaused(function(paused){
+      if (!running || gen !== widgetGen) return;
+      if (!paused) return; // playing — the PLAY event arms the skim timer
+      if (attempt >= 12){
+        setRunning(false);
+        logEl.textContent = 'Playback would not start automatically \u2014 press Start to resume.';
+        return;
+      }
+      widget.play();
+      playRetry = setTimeout(function(){ ensurePlaying(gen, attempt + 1); }, 700);
+    });
+  }
+
   // ---- queue engine ----
-  function loadPlaylistAt(qi, autoplay){
-    if (qi < 0 || qi >= queue.length) return;
-    loadingQ = true;
-    qCur = qi;
-    totalTracks = 0;
+  function advance(){
+    if (!widget || advancing) return;
+    advancing = true;
     clearTimers();
-    startBtn.disabled = true;
-    titleEl.textContent = 'Loading playlist ' + (qi + 1) + '…';
-    renderQueue();
-    widget.load(queue[qi], {
-      auto_play: false,
-      show_teaser: false,
-      visual: false,
-      show_comments: false,
-      callback: function(){
-        applyVolume();
-        widget.getSounds(function(sounds){
-          totalTracks = sounds ? sounds.length : 0;
-          totalEl.textContent = totalTracks || '?';
-          updateStats();
-          loadingQ = false;
-          if (totalTracks === 0){
-            logEl.textContent = 'Playlist ' + (qi + 1) + ' has no playable tracks — skipping it.';
-            nextPlaylist();
-            return;
-          }
-          logEl.textContent = 'Playlist ' + (qi + 1) + '/' + queue.length + ' — ' + totalTracks + ' tracks.';
-          if (autoplay && running){
-            titleEl.textContent = slugTitle(queue[qi]);
-            ensurePlaying(0); // retries play() until the reloaded widget responds
-          } else {
-            startBtn.disabled = running;
-            titleEl.textContent = 'Playlist loaded — press Start.';
-          }
-        });
+    widget.getCurrentSoundIndex(function(i){
+      if (totalTracks > 0 && i >= totalTracks - 1){
+        nextPlaylist(); // this playlist finished its single pass for this queue loop
+      } else {
+        widget.skip(i + 1); // skip auto-plays; PLAY resets the latch and re-arms the timer
       }
     });
   }
@@ -576,41 +562,104 @@
   function nextPlaylist(){
     var nextQ = qCur + 1;
     if (nextQ >= queue.length){
-      // whole queue finished once -> that is one loop
-      loops++;
+      loops++; // the whole queue finished once
       updateStats();
       var target = maxLoops();
       if (target > 0 && loops >= target){
         setRunning(false);
-        widget.pause();
-        logEl.innerHTML = '<b>Done</b> — queue completed <b>' + loops + '</b> loop' + (loops === 1 ? '' : 's') + ' (' + queue.length + ' playlist' + (queue.length === 1 ? '' : 's') + ' each). Stopped automatically.';
+        if (widget) widget.pause();
+        logEl.innerHTML = '<b>Done</b> \u2014 queue completed <b>' + loops + '</b> loop' + (loops === 1 ? '' : 's') + ' (' + queue.length + ' playlist' + (queue.length === 1 ? '' : 's') + ' each). Stopped automatically.';
         return;
       }
       logEl.innerHTML = 'Queue finished &rarr; <b>loop ' + (loops + 1) + '</b>, restarting from playlist 1.';
-      if (queue.length === 1){
-        widget.skip(0); // single playlist: just restart it, no reload needed
-      } else {
-        loadPlaylistAt(0, true);
-      }
+      loadPlaylistAt(0, true);
       return;
     }
-    logEl.innerHTML = 'Moving to <b>playlist ' + (nextQ + 1) + '/' + queue.length + '</b>…';
+    logEl.innerHTML = 'Moving to <b>playlist ' + (nextQ + 1) + '/' + queue.length + '</b>\u2026';
     loadPlaylistAt(nextQ, true);
   }
 
-  function advance(){
-    widget.getCurrentSoundIndex(function(i){
-      if (totalTracks > 0 && i >= totalTracks - 1){
-        nextPlaylist(); // playlist finished its single pass for this queue loop
-      } else {
-        widget.skip(i + 1);
-      }
+  // Build a brand-new player iframe for the playlist. auto_play lives in the
+  // embed URL itself, so the widget starts on its own \u2014 no fragile play() calls
+  // against a half-reloaded player, and the old widget (with any stale state)
+  // is destroyed outright.
+  function buildWidget(url, autoplay){
+    widgetGen++;
+    var gen = widgetGen;
+    loadingQ = true;
+    advancing = false;
+    totalTracks = 0;
+    clearTimers();
+    cancelPlayRetry();
+
+    var old = document.getElementById('sc');
+    var ifr = document.createElement('iframe');
+    ifr.id = 'sc';
+    ifr.setAttribute('allow', 'autoplay');
+    ifr.src = 'https://w.soundcloud.com/player/?url=' + encodeURIComponent(url) +
+              '&auto_play=' + (autoplay ? 'true' : 'false') + EMBED_OPTS;
+    old.parentNode.replaceChild(ifr, old);
+    widget = SC.Widget(ifr);
+
+    widget.bind(SC.Widget.Events.READY, function(){
+      if (gen !== widgetGen) return;
+      applyVolume();
+      widget.getSounds(function(sounds){
+        if (gen !== widgetGen) return;
+        totalTracks = sounds ? sounds.length : 0;
+        totalEl.textContent = totalTracks || '?';
+        idxEl.textContent = '\u2013';
+        updateStats();
+        loadingQ = false;
+        if (totalTracks === 0){
+          logEl.textContent = 'Playlist ' + (qCur + 1) + ' has no playable tracks \u2014 skipping it.';
+          nextPlaylist();
+          return;
+        }
+        logEl.textContent = 'Playlist ' + (qCur + 1) + '/' + queue.length + ' \u2014 ' + totalTracks + ' tracks.';
+        if (autoplay && running){
+          titleEl.textContent = slugTitle(url);
+          ensurePlaying(gen, 0); // backup nudge; normally auto_play already started it
+        } else {
+          startBtn.disabled = running;
+          titleEl.textContent = 'Playlist loaded \u2014 press Start.';
+        }
+      });
     });
+
+    widget.bind(SC.Widget.Events.PLAY, function(){
+      if (gen !== widgetGen) return;
+      cancelPlayRetry();
+      advancing = false;
+      applyVolume();
+      refreshNowPlaying();
+      if (running) armTimer();
+    });
+
+    widget.bind(SC.Widget.Events.FINISH, function(){
+      if (gen !== widgetGen) return;
+      if (running) advance(); // track shorter than the interval
+    });
+
+    widget.bind(SC.Widget.Events.ERROR, function(){
+      if (gen !== widgetGen) return;
+      logEl.textContent = 'Playback error \u2014 skipping.';
+      if (running) advance();
+    });
+  }
+
+  function loadPlaylistAt(qi, autoplay){
+    if (qi < 0 || qi >= queue.length) return;
+    qCur = qi;
+    startBtn.disabled = true;
+    titleEl.textContent = 'Loading playlist ' + (qi + 1) + '\u2026';
+    renderQueue();
+    buildWidget(queue[qi], !!autoplay && running);
   }
 
   function addToQueue(url){
     if (!/^https:\/\/(www\.|m\.|on\.)?soundcloud\.com\//i.test(url)){
-      logEl.textContent = 'That does not look like a soundcloud.com link — check the URL.';
+      logEl.textContent = 'That does not look like a soundcloud.com link \u2014 check the URL.';
       return;
     }
     if (queue.length >= MAX_QUEUE){
@@ -626,7 +675,7 @@
     plUrlInput.value = '';
     renderQueue();
     if (qCur === -1){
-      loadPlaylistAt(0, false); // first playlist: load it, wait for Start
+      loadPlaylistAt(0, false); // first playlist: load and wait for Start
     } else {
       logEl.textContent = 'Added as playlist ' + queue.length + '/' + MAX_QUEUE + '.';
     }
@@ -638,23 +687,23 @@
     saveQueue();
     if (queue.length === 0){
       qCur = -1;
-      setRunning(false);
-      widget.pause();
-      totalTracks = 0;
-      totalEl.textContent = '–';
-      idxEl.textContent = '–';
       loops = 0;
+      setRunning(false);
+      if (widget) widget.pause();
+      totalTracks = 0;
+      totalEl.textContent = '\u2013';
+      idxEl.textContent = '\u2013';
       titleEl.textContent = 'Add a playlist to begin.';
-        renderQueue();
+      renderQueue();
       logEl.textContent = 'Queue cleared.';
       return;
     }
     if (removingActive){
       var wasRunning = running;
-      if (i >= queue.length) i = 0; // removed the last item → wrap to first
+      if (i >= queue.length) i = 0;
       loadPlaylistAt(i, wasRunning);
     } else {
-      if (i < qCur) qCur--; // keep pointer on the same playlist
+      if (i < qCur) qCur--;
       renderQueue();
     }
   }
@@ -663,34 +712,6 @@
     if (i === qCur || loadingQ) return;
     loadPlaylistAt(i, running);
   }
-
-  // ---- widget events ----
-  var booted = false;
-  widget.bind(SC.Widget.Events.READY, function(){
-    if (booted) return; // READY also fires after widget.load — handled by its callback
-    booted = true;
-    renderQueue();
-    if (queue.length > 0){
-      loadPlaylistAt(0, false);
-    } else {
-      }
-  });
-
-  widget.bind(SC.Widget.Events.PLAY, function(){
-    cancelPlayRetry();
-    applyVolume();
-    refreshNowPlaying();
-    if (running) armTimer();
-  });
-
-  widget.bind(SC.Widget.Events.FINISH, function(){
-    if (running){ clearTimers(); advance(); }
-  });
-
-  widget.bind(SC.Widget.Events.ERROR, function(){
-    logEl.textContent = 'Playback error — skipping this track.';
-    if (running){ clearTimers(); advance(); }
-  });
 
   // ---- controls ----
   addBtn.addEventListener('click', function(){
@@ -702,14 +723,13 @@
   });
 
   startBtn.addEventListener('click', function(){
-    if (queue.length === 0 || totalTracks === 0) return;
+    if (queue.length === 0 || totalTracks === 0 || !widget) return;
     var target = maxLoops();
     if (target > 0 && loops >= target){
-      // fresh run after a finished cycle: reset counter, restart queue from the top
-      loops = 0;
+      loops = 0; // fresh run after a finished cycle: restart the queue from the top
       updateStats();
       setRunning(true);
-      if (qCur === 0){ widget.skip(0); } else { loadPlaylistAt(0, true); }
+      loadPlaylistAt(0, true);
     } else {
       setRunning(true);
       widget.play();
@@ -718,13 +738,13 @@
 
   stopBtn.addEventListener('click', function(){
     setRunning(false);
-    widget.pause();
+    if (widget) widget.pause();
   });
 
   secsInput.addEventListener('change', function(){
     secsInput.value = seconds();
     if (running){
-      statusEl.textContent = 'playing · ' + seconds() + 's/track';
+      statusEl.textContent = 'playing \u00b7 ' + seconds() + 's/track';
       armTimer();
     }
   });
@@ -741,8 +761,14 @@
     try { localStorage.setItem('skimmer.muted', muted ? '1' : '0'); } catch(e){}
   });
 
+  // ---- init ----
   applyMuteUI();
   renderQueue();
+  if (queue.length > 0){
+    loadPlaylistAt(0, false);
+  } else {
+    titleEl.textContent = 'Add a playlist to begin.';
+  }
 })();
 </script>
 </body>
