@@ -23,8 +23,8 @@
     background:var(--bg);
     color:var(--ink);
     font-family:'IBM Plex Sans',system-ui,sans-serif;
-    display:flex;align-items:center;justify-content:center;
-    padding:24px;
+    display:flex;align-items:flex-start;justify-content:center;
+    padding:40px 24px;
   }
   .app{width:100%;max-width:560px}
 
@@ -33,17 +33,16 @@
     font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.18em;
     text-transform:uppercase;color:var(--accent);
   }
-  .head-right{display:flex;align-items:center;gap:12px}
   .status-pill{
     font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;
     text-transform:uppercase;color:var(--ink-dim);
+    white-space:nowrap;align-self:center;padding-left:4px;text-align:right;
   }
   .status-pill.live{color:var(--accent)}
   .mute-btn{
     background:none;border:0;cursor:pointer;padding:2px 4px;
     font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;
     text-transform:uppercase;color:var(--ink-dim);
-    border-bottom:1px dotted transparent;
   }
   .mute-btn:hover{color:var(--ink)}
   .mute-btn.on{color:var(--accent)}
@@ -52,7 +51,7 @@
   h1{font-weight:300;font-size:26px;letter-spacing:-.01em;margin-bottom:20px}
   h1 em{font-style:normal;font-weight:600;color:var(--accent)}
 
-  .loader{display:flex;gap:10px;margin-bottom:18px}
+  .loader{display:flex;gap:10px;margin-bottom:10px;align-items:stretch}
   .loader input{
     flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);
     border-radius:6px;color:var(--ink);padding:11px 14px;
@@ -61,7 +60,40 @@
   .loader input:focus{outline:none;border-color:var(--accent-dim)}
   .loader input::placeholder{color:var(--ink-dim);opacity:.6}
 
-  /* — the per-track countdown bar — */
+  /* ---- playlist queue ---- */
+  .queue{margin-bottom:18px}
+  .queue-item{
+    display:flex;align-items:center;gap:12px;
+    border:1px solid var(--line);border-radius:6px;background:var(--panel);
+    padding:9px 12px;margin-bottom:6px;cursor:pointer;
+    transition:border-color .15s;
+  }
+  .queue-item:hover{border-color:var(--accent-dim)}
+  .queue-item.active{border-color:var(--accent)}
+  .queue-item .qnum{
+    font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-dim);
+    width:16px;flex-shrink:0;
+  }
+  .queue-item.active .qnum{color:var(--accent)}
+  .queue-item .qname{
+    flex:1;min-width:0;font-size:13px;color:var(--ink);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .queue-item.done .qname{color:var(--ink-dim);text-decoration:line-through}
+  .queue-item .qmark{
+    font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--accent);flex-shrink:0;
+  }
+  .queue-item .qdel{
+    background:none;border:0;color:var(--ink-dim);cursor:pointer;
+    font-size:14px;line-height:1;padding:2px 4px;flex-shrink:0;
+  }
+  .queue-item .qdel:hover{color:#d98a8a}
+  .queue-empty{
+    font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-dim);
+    padding:4px 2px;letter-spacing:.04em;
+  }
+
   .strip{
     position:relative;height:4px;background:var(--line);
     border-radius:2px;overflow:hidden;margin-bottom:14px;
@@ -127,6 +159,9 @@
     font-family:'IBM Plex Mono',monospace;font-size:14px;text-align:right;
   }
   .setting input:focus{outline:none;color:var(--accent)}
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  input[type=number]{-moz-appearance:textfield;appearance:textfield}
   .setting .hint{
     font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-dim);opacity:.7;
   }
@@ -136,10 +171,6 @@
     color:var(--ink-dim);letter-spacing:.04em;min-height:16px;
   }
   .log b{color:var(--accent);font-weight:500}
-
-  @media (prefers-reduced-motion: reduce){
-    .strip .fill{transition:none !important}
-  }
 
   /* ---- password gate ---- */
   .gate{
@@ -172,6 +203,11 @@
     25%{transform:translateX(-7px)}
     75%{transform:translateX(7px)}
   }
+
+  @media (prefers-reduced-motion: reduce){
+    .strip .fill{transition:none !important}
+    .gate-box.shake{animation:none}
+  }
 </style>
 </head>
 <body>
@@ -189,27 +225,27 @@
 
 <div class="app">
   <div class="head">
-    <div class="eyebrow">storytellers.records / playlist skimmer</div>
-    <div class="head-right">
-      <button class="mute-btn" id="muteBtn" title="Mute playback">&#128266; sound</button>
-      <div class="status-pill" id="status">standby</div>
-    </div>
+    <div class="eyebrow">storytellers.records</div>
+    <button class="mute-btn" id="muteBtn" title="Mute playback">&#128266; sound</button>
   </div>
-  <h1 id="plTitle">Playlist <em>Skimmer</em></h1>
+  <h1>Playlist <em>Skimmer</em></h1>
 
   <div class="loader">
-    <input id="plUrl" type="url" placeholder="https://soundcloud.com/…/sets/…" spellcheck="false"
-           value="https://soundcloud.com/storytellers-records/sets/a-distinctive-array-of-hits-2026">
-    <button id="loadBtn">Load</button>
+    <input id="plUrl" type="url" placeholder="https://soundcloud.com/…/sets/…" spellcheck="false">
+    <button id="addBtn">Add</button>
+    <div class="status-pill" id="status">standby</div>
   </div>
+
+  <div class="queue" id="queueList"></div>
 
   <div class="strip"><div class="fill" id="fill"></div></div>
 
   <div class="now">
-    <div class="title" id="trackTitle">Loading playlist…</div>
+    <div class="title" id="trackTitle">Add a playlist to begin.</div>
     <div class="stats">
+      <span class="stat"><span class="lbl">list</span><b id="qIdx">–</b>/<span id="qTotal">–</span></span>
       <span class="stat"><span class="lbl">track</span><b id="idx">–</b>/<span id="total">–</span></span>
-      <span class="stat"><span class="lbl">loop</span><b id="loopCur">0</b><span id="loopMax">/∞</span></span>
+      <span class="stat"><span class="lbl">loop</span><b id="loopCur">0</b><span id="loopMax">/&infin;</span></span>
     </div>
   </div>
 
@@ -223,14 +259,13 @@
     <div class="row">
       <button class="primary" id="startBtn" disabled>Start</button>
       <button class="stop" id="stopBtn" disabled>Stop</button>
-      <button id="nextBtn" title="Jump to the next track now">Skip &rarr;</button>
     </div>
     <div class="row">
       <div class="setting">
         <label for="secs">sec / track</label>
         <input id="secs" type="number" min="2" max="60" step="1" value="5">
       </div>
-      <div class="setting" title="How many full passes through the playlist. 0 = forever.">
+      <div class="setting" title="Full passes per playlist before moving to the next one. 0 = single playlist forever / whole queue on repeat.">
         <label for="maxLoops">loops</label>
         <span class="hint">0 = &infin;</span>
         <input id="maxLoops" type="number" min="0" max="999" step="1" value="0">
@@ -263,7 +298,6 @@
     try { localStorage.setItem('skimmer.auth', HASH); } catch(e){}
   }
 
-  // already unlocked on this device?
   try {
     if (localStorage.getItem('skimmer.auth') === HASH){ gate.classList.add('hidden'); }
   } catch(e){}
@@ -282,7 +316,7 @@
         err.textContent = 'Wrong password.';
         inp.value = '';
         box.classList.remove('shake');
-        void box.offsetWidth; // restart animation
+        void box.offsetWidth;
         box.classList.add('shake');
         inp.focus();
       }
@@ -296,40 +330,56 @@
 <script src="https://w.soundcloud.com/player/api.js"></script>
 <script>
 (function(){
+  var MAX_QUEUE = 5;
+
   var widget     = SC.Widget(document.getElementById('sc'));
   var startBtn   = document.getElementById('startBtn');
   var stopBtn    = document.getElementById('stopBtn');
-  var nextBtn    = document.getElementById('nextBtn');
   var muteBtn    = document.getElementById('muteBtn');
-  var loadBtn    = document.getElementById('loadBtn');
+  var addBtn     = document.getElementById('addBtn');
   var plUrlInput = document.getElementById('plUrl');
-  var plTitleEl  = document.getElementById('plTitle');
+  var queueEl    = document.getElementById('queueList');
   var secsInput  = document.getElementById('secs');
   var maxLoopsIn = document.getElementById('maxLoops');
   var fill       = document.getElementById('fill');
   var statusEl   = document.getElementById('status');
   var titleEl    = document.getElementById('trackTitle');
+  var qIdxEl     = document.getElementById('qIdx');
+  var qTotalEl   = document.getElementById('qTotal');
   var idxEl      = document.getElementById('idx');
   var totalEl    = document.getElementById('total');
   var loopCurEl  = document.getElementById('loopCur');
   var loopMaxEl  = document.getElementById('loopMax');
   var logEl      = document.getElementById('log');
 
+  var queue       = [];   // playlist URLs, max 5
+  var qCur        = -1;   // index of active playlist in queue
   var running     = false;
   var muted       = false;
   var totalTracks = 0;
-  var loops       = 0;
+  var loops       = 0;    // full passes of the CURRENT playlist
   var timer       = null;
   var raf         = null;
   var startedAt   = 0;
+  var loadingQ    = false;
 
-  // restore last used playlist + mute preference
+  // ---- persistence ----
   try {
-    var saved = localStorage.getItem('skimmer.playlist');
-    if (saved) plUrlInput.value = saved;
     muted = localStorage.getItem('skimmer.muted') === '1';
-  } catch(e){}
+    var savedQ = localStorage.getItem('skimmer.queue');
+    if (savedQ){
+      queue = JSON.parse(savedQ).slice(0, MAX_QUEUE);
+    } else {
+      var legacy = localStorage.getItem('skimmer.playlist'); // migrate old single-playlist key
+      if (legacy) queue = [legacy];
+    }
+  } catch(e){ queue = []; }
 
+  function saveQueue(){
+    try { localStorage.setItem('skimmer.queue', JSON.stringify(queue)); } catch(e){}
+  }
+
+  // ---- helpers ----
   function seconds(){
     var v = parseInt(secsInput.value, 10);
     if (isNaN(v)) v = 5;
@@ -339,13 +389,72 @@
   function maxLoops(){
     var v = parseInt(maxLoopsIn.value, 10);
     if (isNaN(v) || v < 0) v = 0;
-    return v; // 0 = forever
+    return v; // 0 = infinite (single playlist) / whole queue on repeat (multiple)
   }
 
-  function updateLoopStats(){
+  function slugTitle(url){
+    try {
+      var parts = new URL(url).pathname.split('/').filter(Boolean);
+      var slug = parts[parts.length - 1] || 'playlist';
+      return slug.replace(/-/g, ' ');
+    } catch(e){ return 'playlist'; }
+  }
+
+  function updateStats(){
+    qIdxEl.textContent = qCur >= 0 ? (qCur + 1) : '–';
+    qTotalEl.textContent = queue.length || '–';
     loopCurEl.textContent = loops;
     var m = maxLoops();
+    if (m === 0 && queue.length > 1) m = 1; // multi-playlist: 0 means 1 pass each, queue repeats
     loopMaxEl.innerHTML = m === 0 ? '/&infin;' : '/' + m;
+  }
+
+  function passesPerPlaylist(){
+    var m = maxLoops();
+    if (m === 0) return queue.length > 1 ? 1 : 0; // 0 = infinite only when a single playlist is queued
+    return m;
+  }
+
+  function renderQueue(){
+    queueEl.innerHTML = '';
+    if (queue.length === 0){
+      var empty = document.createElement('div');
+      empty.className = 'queue-empty';
+      empty.textContent = 'Queue empty — add up to ' + MAX_QUEUE + ' playlists.';
+      queueEl.appendChild(empty);
+    }
+    queue.forEach(function(url, i){
+      var item = document.createElement('div');
+      item.className = 'queue-item' + (i === qCur ? ' active' : '');
+      item.title = url;
+
+      var num = document.createElement('span');
+      num.className = 'qnum';
+      num.textContent = (i + 1);
+
+      var name = document.createElement('span');
+      name.className = 'qname';
+      name.textContent = slugTitle(url);
+
+      var mark = document.createElement('span');
+      mark.className = 'qmark';
+      mark.textContent = i === qCur ? (running ? 'playing' : 'loaded') : '';
+
+      var del = document.createElement('button');
+      del.className = 'qdel';
+      del.innerHTML = '&times;';
+      del.title = 'Remove from queue';
+      del.addEventListener('click', function(ev){
+        ev.stopPropagation();
+        removeFromQueue(i);
+      });
+
+      item.addEventListener('click', function(){ jumpToPlaylist(i); });
+      item.appendChild(num); item.appendChild(name); item.appendChild(mark); item.appendChild(del);
+      queueEl.appendChild(item);
+    });
+    addBtn.disabled = queue.length >= MAX_QUEUE;
+    updateStats();
   }
 
   function applyMuteUI(){
@@ -370,6 +479,7 @@
       statusEl.classList.remove('live');
       clearTimers();
     }
+    renderQueue();
   }
 
   function clearTimers(){
@@ -397,16 +507,79 @@
     });
   }
 
+  function armTimer(){
+    clearTimers();
+    if (!running) return;
+    var ms = seconds() * 1000;
+    animateStrip(ms);
+    timer = setTimeout(advance, ms);
+  }
+
+  // ---- queue engine ----
+  function loadPlaylistAt(qi, autoplay){
+    if (qi < 0 || qi >= queue.length) return;
+    loadingQ = true;
+    qCur = qi;
+    loops = 0;
+    totalTracks = 0;
+    clearTimers();
+    startBtn.disabled = true;
+    titleEl.textContent = 'Loading playlist ' + (qi + 1) + '…';
+    renderQueue();
+    widget.load(queue[qi], {
+      auto_play: false,
+      show_teaser: false,
+      visual: false,
+      show_comments: false,
+      callback: function(){
+        applyVolume();
+        widget.getSounds(function(sounds){
+          totalTracks = sounds ? sounds.length : 0;
+          totalEl.textContent = totalTracks || '?';
+          updateStats();
+          loadingQ = false;
+          if (totalTracks === 0){
+            logEl.textContent = 'Playlist ' + (qi + 1) + ' has no playable tracks — skipping it.';
+            nextPlaylist();
+            return;
+          }
+          logEl.textContent = 'Playlist ' + (qi + 1) + '/' + queue.length + ' — ' + totalTracks + ' tracks.';
+          if (autoplay && running){
+            widget.play(); // PLAY event arms the timer
+          } else {
+            startBtn.disabled = running;
+            titleEl.textContent = 'Playlist loaded — press Start.';
+          }
+        });
+      }
+    });
+  }
+
+  function nextPlaylist(){
+    var nextQ = qCur + 1;
+    if (nextQ >= queue.length){
+      if (maxLoops() === 0 && queue.length > 1){
+        logEl.innerHTML = 'Queue finished &rarr; <b>restarting from playlist 1</b> (loops = 0: queue on repeat).';
+        loadPlaylistAt(0, true);
+      } else {
+        setRunning(false);
+        widget.pause();
+        logEl.innerHTML = '<b>Queue complete</b> — all ' + queue.length + ' playlist' + (queue.length === 1 ? '' : 's') + ' done. Stopped automatically.';
+      }
+      return;
+    }
+    logEl.innerHTML = 'Moving to <b>playlist ' + (nextQ + 1) + '/' + queue.length + '</b>…';
+    loadPlaylistAt(nextQ, true);
+  }
+
   function advance(){
     widget.getCurrentSoundIndex(function(i){
       if (totalTracks > 0 && i >= totalTracks - 1){
         loops++;
-        updateLoopStats();
-        var limit = maxLoops();
-        if (limit > 0 && loops >= limit){
-          setRunning(false);
-          widget.pause();
-          logEl.innerHTML = 'Done — playlist completed <b>' + loops + '</b> full pass' + (loops === 1 ? '' : 'es') + '. Stopped automatically.';
+        updateStats();
+        var target = passesPerPlaylist();
+        if (target > 0 && loops >= target){
+          nextPlaylist();
           return;
         }
         logEl.innerHTML = 'End of playlist &rarr; <b>restarting from track 1</b> (loop ' + loops + ')';
@@ -417,94 +590,80 @@
     });
   }
 
-  function armTimer(){
-    clearTimers();
-    if (!running) return;
-    var ms = seconds() * 1000;
-    animateStrip(ms);
-    timer = setTimeout(advance, ms);
-  }
-
-  function slugTitle(url){
-    try {
-      var parts = new URL(url).pathname.split('/').filter(Boolean);
-      var slug = parts[parts.length - 1] || 'playlist';
-      return slug.replace(/-/g, ' ');
-    } catch(e){ return 'playlist'; }
-  }
-
-  function setHeaderTitle(url){
-    plTitleEl.innerHTML = '';
-    var em = document.createElement('em');
-    em.textContent = slugTitle(url);
-    plTitleEl.appendChild(em);
-  }
-
-  function resetState(){
-    running = false;
-    loops = 0;
-    totalTracks = 0;
-    clearTimers();
-    startBtn.disabled = true;
-    stopBtn.disabled = true;
-    statusEl.textContent = 'standby';
-    statusEl.classList.remove('live');
-    idxEl.textContent = '–';
-    totalEl.textContent = '–';
-    updateLoopStats();
-    titleEl.textContent = 'Loading playlist…';
-  }
-
-  function initPlaylist(){
-    applyVolume();
-    widget.getSounds(function(sounds){
-      totalTracks = sounds ? sounds.length : 0;
-      totalEl.textContent = totalTracks || '?';
-      titleEl.textContent = 'Playlist loaded — press Start.';
-      startBtn.disabled = totalTracks === 0;
-      updateLoopStats();
-      logEl.textContent = totalTracks + ' tracks found in playlist.';
-    });
-  }
-
-  function loadPlaylist(url){
+  function addToQueue(url){
     if (!/^https:\/\/(www\.|m\.|on\.)?soundcloud\.com\//i.test(url)){
       logEl.textContent = 'That does not look like a soundcloud.com link — check the URL.';
       return;
     }
-    resetState();
-    setHeaderTitle(url);
-    try { localStorage.setItem('skimmer.playlist', url); } catch(e){}
-    widget.load(url, {
-      auto_play: false,
-      show_teaser: false,
-      visual: false,
-      show_comments: false,
-      callback: initPlaylist
-    });
+    if (queue.length >= MAX_QUEUE){
+      logEl.textContent = 'Queue is full (' + MAX_QUEUE + ' playlists max).';
+      return;
+    }
+    if (queue.indexOf(url) !== -1){
+      logEl.textContent = 'That playlist is already in the queue.';
+      return;
+    }
+    queue.push(url);
+    saveQueue();
+    plUrlInput.value = '';
+    renderQueue();
+    if (qCur === -1){
+      loadPlaylistAt(0, false); // first playlist: load it, wait for Start
+    } else {
+      logEl.textContent = 'Added as playlist ' + queue.length + '/' + MAX_QUEUE + '.';
+    }
+  }
+
+  function removeFromQueue(i){
+    var removingActive = (i === qCur);
+    queue.splice(i, 1);
+    saveQueue();
+    if (queue.length === 0){
+      qCur = -1;
+      setRunning(false);
+      widget.pause();
+      totalTracks = 0;
+      totalEl.textContent = '–';
+      idxEl.textContent = '–';
+      loops = 0;
+      titleEl.textContent = 'Add a playlist to begin.';
+        renderQueue();
+      logEl.textContent = 'Queue cleared.';
+      return;
+    }
+    if (removingActive){
+      var wasRunning = running;
+      if (i >= queue.length) i = 0; // removed the last item → wrap to first
+      loadPlaylistAt(i, wasRunning);
+    } else {
+      if (i < qCur) qCur--; // keep pointer on the same playlist
+      renderQueue();
+    }
+  }
+
+  function jumpToPlaylist(i){
+    if (i === qCur || loadingQ) return;
+    loadPlaylistAt(i, running);
   }
 
   // ---- widget events ----
   var booted = false;
   widget.bind(SC.Widget.Events.READY, function(){
-    if (booted) return; // READY also fires after widget.load — init handled by its callback
+    if (booted) return; // READY also fires after widget.load — handled by its callback
     booted = true;
-    var current = plUrlInput.value.trim();
-    if (current && current.indexOf('a-distinctive-array-of-hits-2026') === -1){
-      loadPlaylist(current); // playlist remembered from last session
+    renderQueue();
+    if (queue.length > 0){
+      loadPlaylistAt(0, false);
     } else {
-      setHeaderTitle(current);
-      initPlaylist();
-    }
+      }
   });
 
   widget.bind(SC.Widget.Events.PLAY, function(){
-    applyVolume(); // keep mute across track changes and reloads
+    applyVolume();
     refreshNowPlaying();
     if (running) armTimer();
   });
 
-  // if a track is shorter than the interval, move on when it finishes
   widget.bind(SC.Widget.Events.FINISH, function(){
     if (running){ clearTimers(); advance(); }
   });
@@ -515,23 +674,21 @@
   });
 
   // ---- controls ----
-  loadBtn.addEventListener('click', function(){
+  addBtn.addEventListener('click', function(){
     var url = plUrlInput.value.trim();
-    if (running) widget.pause();
-    loadPlaylist(url);
+    if (url) addToQueue(url);
   });
   plUrlInput.addEventListener('keydown', function(e){
-    if (e.key === 'Enter') loadBtn.click();
+    if (e.key === 'Enter') addBtn.click();
   });
 
   startBtn.addEventListener('click', function(){
-    var limit = maxLoops();
-    if (limit > 0 && loops >= limit){
-      // fresh run after a finished cycle: reset counter + back to track 1
-      loops = 0;
-      updateLoopStats();
+    if (queue.length === 0 || totalTracks === 0) return;
+    var target = passesPerPlaylist();
+    if (target > 0 && loops >= target){
+      // fresh run after a finished cycle: restart queue from the top
       setRunning(true);
-      widget.skip(0); // skip starts playback; PLAY arms the timer
+      loadPlaylistAt(0, true);
     } else {
       setRunning(true);
       widget.play();
@@ -543,22 +700,17 @@
     widget.pause();
   });
 
-  nextBtn.addEventListener('click', function(){
-    clearTimers();
-    advance();
-  });
-
   secsInput.addEventListener('change', function(){
     secsInput.value = seconds();
     if (running){
       statusEl.textContent = 'playing · ' + seconds() + 's/track';
-      armTimer(); // re-arm with the new interval from now
+      armTimer();
     }
   });
 
   maxLoopsIn.addEventListener('change', function(){
     maxLoopsIn.value = maxLoops();
-    updateLoopStats();
+    updateStats();
   });
 
   muteBtn.addEventListener('click', function(){
@@ -569,6 +721,7 @@
   });
 
   applyMuteUI();
+  renderQueue();
 })();
 </script>
 </body>
