@@ -362,6 +362,7 @@
   var raf         = null;
   var startedAt   = 0;
   var loadingQ    = false;
+  var playRetry   = null;
 
   // ---- persistence ----
   try {
@@ -471,6 +472,7 @@
       statusEl.textContent = 'standby';
       statusEl.classList.remove('live');
       clearTimers();
+      cancelPlayRetry();
     }
     renderQueue();
   }
@@ -497,6 +499,29 @@
       widget.getCurrentSound(function(s){
         if (s && s.title) titleEl.textContent = s.title;
       });
+    });
+  }
+
+  function cancelPlayRetry(){
+    if (playRetry){ clearTimeout(playRetry); playRetry = null; }
+  }
+
+  // After widget.load() the iframe reloads and an immediate play() is often
+  // silently ignored. Keep nudging it until playback actually starts.
+  function ensurePlaying(attempt){
+    attempt = attempt || 0;
+    cancelPlayRetry();
+    if (!running) return;
+    widget.isPaused(function(paused){
+      if (!running) return;
+      if (!paused) return; // it's playing — PLAY event will arm the timer
+      if (attempt >= 10){
+        setRunning(false);
+        logEl.textContent = 'Playback would not start automatically — press Start to resume.';
+        return;
+      }
+      widget.play();
+      playRetry = setTimeout(function(){ ensurePlaying(attempt + 1); }, 700);
     });
   }
 
@@ -537,7 +562,8 @@
           }
           logEl.textContent = 'Playlist ' + (qi + 1) + '/' + queue.length + ' — ' + totalTracks + ' tracks.';
           if (autoplay && running){
-            widget.play(); // PLAY event arms the timer
+            titleEl.textContent = slugTitle(queue[qi]);
+            ensurePlaying(0); // retries play() until the reloaded widget responds
           } else {
             startBtn.disabled = running;
             titleEl.textContent = 'Playlist loaded — press Start.';
@@ -651,6 +677,7 @@
   });
 
   widget.bind(SC.Widget.Events.PLAY, function(){
+    cancelPlayRetry();
     applyVolume();
     refreshNowPlaying();
     if (running) armTimer();
