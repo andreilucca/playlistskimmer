@@ -265,7 +265,7 @@
         <label for="secs">sec / track</label>
         <input id="secs" type="number" min="2" max="60" step="1" value="5">
       </div>
-      <div class="setting" title="Full passes per playlist before moving to the next one. 0 = single playlist forever / whole queue on repeat.">
+      <div class="setting" title="How many times the whole queue plays (all playlists once = 1 loop). 0 = repeat forever.">
         <label for="maxLoops">loops</label>
         <span class="hint">0 = &infin;</span>
         <input id="maxLoops" type="number" min="0" max="999" step="1" value="0">
@@ -357,7 +357,7 @@
   var running     = false;
   var muted       = false;
   var totalTracks = 0;
-  var loops       = 0;    // full passes of the CURRENT playlist
+  var loops       = 0;    // full passes of the WHOLE QUEUE (all playlists once = 1 loop)
   var timer       = null;
   var raf         = null;
   var startedAt   = 0;
@@ -405,14 +405,7 @@
     qTotalEl.textContent = queue.length || '–';
     loopCurEl.textContent = loops;
     var m = maxLoops();
-    if (m === 0 && queue.length > 1) m = 1; // multi-playlist: 0 means 1 pass each, queue repeats
     loopMaxEl.innerHTML = m === 0 ? '/&infin;' : '/' + m;
-  }
-
-  function passesPerPlaylist(){
-    var m = maxLoops();
-    if (m === 0) return queue.length > 1 ? 1 : 0; // 0 = infinite only when a single playlist is queued
-    return m;
   }
 
   function renderQueue(){
@@ -520,7 +513,6 @@
     if (qi < 0 || qi >= queue.length) return;
     loadingQ = true;
     qCur = qi;
-    loops = 0;
     totalTracks = 0;
     clearTimers();
     startBtn.disabled = true;
@@ -558,13 +550,21 @@
   function nextPlaylist(){
     var nextQ = qCur + 1;
     if (nextQ >= queue.length){
-      if (maxLoops() === 0 && queue.length > 1){
-        logEl.innerHTML = 'Queue finished &rarr; <b>restarting from playlist 1</b> (loops = 0: queue on repeat).';
-        loadPlaylistAt(0, true);
-      } else {
+      // whole queue finished once -> that is one loop
+      loops++;
+      updateStats();
+      var target = maxLoops();
+      if (target > 0 && loops >= target){
         setRunning(false);
         widget.pause();
-        logEl.innerHTML = '<b>Queue complete</b> — all ' + queue.length + ' playlist' + (queue.length === 1 ? '' : 's') + ' done. Stopped automatically.';
+        logEl.innerHTML = '<b>Done</b> — queue completed <b>' + loops + '</b> loop' + (loops === 1 ? '' : 's') + ' (' + queue.length + ' playlist' + (queue.length === 1 ? '' : 's') + ' each). Stopped automatically.';
+        return;
+      }
+      logEl.innerHTML = 'Queue finished &rarr; <b>loop ' + (loops + 1) + '</b>, restarting from playlist 1.';
+      if (queue.length === 1){
+        widget.skip(0); // single playlist: just restart it, no reload needed
+      } else {
+        loadPlaylistAt(0, true);
       }
       return;
     }
@@ -575,15 +575,7 @@
   function advance(){
     widget.getCurrentSoundIndex(function(i){
       if (totalTracks > 0 && i >= totalTracks - 1){
-        loops++;
-        updateStats();
-        var target = passesPerPlaylist();
-        if (target > 0 && loops >= target){
-          nextPlaylist();
-          return;
-        }
-        logEl.innerHTML = 'End of playlist &rarr; <b>restarting from track 1</b> (loop ' + loops + ')';
-        widget.skip(0);
+        nextPlaylist(); // playlist finished its single pass for this queue loop
       } else {
         widget.skip(i + 1);
       }
@@ -684,11 +676,13 @@
 
   startBtn.addEventListener('click', function(){
     if (queue.length === 0 || totalTracks === 0) return;
-    var target = passesPerPlaylist();
+    var target = maxLoops();
     if (target > 0 && loops >= target){
-      // fresh run after a finished cycle: restart queue from the top
+      // fresh run after a finished cycle: reset counter, restart queue from the top
+      loops = 0;
+      updateStats();
       setRunning(true);
-      loadPlaylistAt(0, true);
+      if (qCur === 0){ widget.skip(0); } else { loadPlaylistAt(0, true); }
     } else {
       setRunning(true);
       widget.play();
