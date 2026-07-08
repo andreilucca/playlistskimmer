@@ -40,10 +40,6 @@
   }
   .status-pill.live{color:var(--accent)}
   .head-right{display:flex;align-items:center;gap:14px}
-  .ver{
-    font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.14em;
-    color:var(--ink-dim);opacity:.7;text-transform:uppercase;
-  }
   .mute-btn{
     background:none;border:0;cursor:pointer;padding:2px 4px;
     font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;
@@ -130,6 +126,7 @@
     border:1px solid var(--line);border-radius:8px;overflow:hidden;
     background:var(--panel);margin-bottom:16px;
   }
+  .player.hidden{display:none}
   iframe{display:block;width:100%;height:166px;border:0}
 
   .controls{display:flex;flex-direction:column;gap:10px}
@@ -176,6 +173,18 @@
     color:var(--ink-dim);letter-spacing:.04em;min-height:16px;
   }
   .log b{color:var(--accent);font-weight:500}
+
+  .legend{
+    margin-top:18px;padding-top:14px;border-top:1px solid var(--line);
+  }
+  .legend-row{
+    font-size:12px;color:var(--ink-dim);line-height:1.6;margin-bottom:6px;
+  }
+  .legend-row b{color:var(--ink);font-weight:600}
+  .legend-term{
+    font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--accent);margin-right:8px;
+  }
 
   /* ---- password gate ---- */
   .gate{
@@ -232,7 +241,6 @@
   <div class="head">
     <div class="eyebrow">storytellers.records</div>
     <div class="head-right">
-      <span class="ver">v3</span>
       <button class="mute-btn" id="muteBtn" title="Mute playback">&#128266; sound</button>
     </div>
   </div>
@@ -257,10 +265,8 @@
     </div>
   </div>
 
-  <div class="player">
-    <iframe id="sc" allow="autoplay"
-      src="https://w.soundcloud.com/player/?url=https%3A%2F%2Fsoundcloud.com%2Fstorytellers-records%2Fsets%2Fa-distinctive-array-of-hits-2026&auto_play=false&show_teaser=false&visual=false&show_comments=false">
-    </iframe>
+  <div class="player hidden" id="playerBox">
+    <iframe id="sc" allow="autoplay" src="about:blank"></iframe>
   </div>
 
   <div class="controls">
@@ -270,18 +276,22 @@
     </div>
     <div class="row">
       <div class="setting">
-        <label for="secs">sec / track</label>
+        <label for="secs">track playing seconds</label>
         <input id="secs" type="number" min="2" max="60" step="1" value="5">
       </div>
-      <div class="setting" title="How many times the whole queue plays (all playlists once = 1 loop). 0 = repeat forever.">
+      <div class="setting" title="How many times the whole queue plays (all playlists once = 1 loop). Leave 0 to repeat forever.">
         <label for="maxLoops">loops</label>
-        <span class="hint">0 = &infin;</span>
         <input id="maxLoops" type="number" min="0" max="999" step="1" value="0">
       </div>
     </div>
   </div>
 
   <div class="log" id="log"></div>
+
+  <div class="legend">
+    <div class="legend-row"><span class="legend-term">track playing seconds</span> how long each track plays before the app skips to the next one (2&ndash;60s).</div>
+    <div class="legend-row"><span class="legend-term">loops</span> how many times the whole queue plays &mdash; one loop = every playlist played once, in order. <b>0</b> = repeat forever until you press Stop.</div>
+  </div>
 </div>
 
 <script>
@@ -303,11 +313,13 @@
 
   function unlock(){
     gate.classList.add('hidden');
-    try { localStorage.setItem('skimmer.auth', HASH); } catch(e){}
+    try { sessionStorage.setItem('skimmer.auth', HASH); } catch(e){}
   }
 
+  // Unlock lives in sessionStorage: valid for this tab only, gone when the
+  // tab or browser closes. A refresh in the same tab stays unlocked.
   try {
-    if (localStorage.getItem('skimmer.auth') === HASH){ gate.classList.add('hidden'); }
+    if (sessionStorage.getItem('skimmer.auth') === HASH){ gate.classList.add('hidden'); }
   } catch(e){}
 
   function attempt(){
@@ -359,6 +371,7 @@
   var loopCurEl  = document.getElementById('loopCur');
   var loopMaxEl  = document.getElementById('loopMax');
   var logEl      = document.getElementById('log');
+  var playerBox  = document.getElementById('playerBox');
 
   var widget      = null;  // rebuilt from scratch for every playlist — no widget.load()
   var widgetGen   = 0;     // generation counter: events from torn-down widgets are ignored
@@ -375,20 +388,21 @@
   var advancing   = false; // latch against double-advance (timer + FINISH racing)
   var playRetry   = null;
 
-  // ---- persistence ----
+  // ---- session-only state: everything resets when the tab/browser closes ----
   try {
-    muted = localStorage.getItem('skimmer.muted') === '1';
-    var savedQ = localStorage.getItem('skimmer.queue');
-    if (savedQ){
-      queue = JSON.parse(savedQ).slice(0, MAX_QUEUE);
-    } else {
-      var legacy = localStorage.getItem('skimmer.playlist');
-      if (legacy) queue = [legacy];
-    }
+    // remove data persisted by older versions of the app
+    ['skimmer.auth','skimmer.queue','skimmer.playlist','skimmer.muted'].forEach(function(k){
+      localStorage.removeItem(k);
+    });
+  } catch(e){}
+  try {
+    muted = sessionStorage.getItem('skimmer.muted') === '1';
+    var savedQ = sessionStorage.getItem('skimmer.queue');
+    if (savedQ) queue = JSON.parse(savedQ).slice(0, MAX_QUEUE);
   } catch(e){ queue = []; }
 
   function saveQueue(){
-    try { localStorage.setItem('skimmer.queue', JSON.stringify(queue)); } catch(e){}
+    try { sessionStorage.setItem('skimmer.queue', JSON.stringify(queue)); } catch(e){}
   }
 
   // ---- helpers ----
@@ -592,6 +606,7 @@
     clearTimers();
     cancelPlayRetry();
 
+    playerBox.classList.remove('hidden');
     var old = document.getElementById('sc');
     var ifr = document.createElement('iframe');
     ifr.id = 'sc';
@@ -689,7 +704,16 @@
       qCur = -1;
       loops = 0;
       setRunning(false);
-      if (widget) widget.pause();
+      // tear down the player entirely: blank iframe, drop the widget, hide the box
+      widgetGen++;
+      widget = null;
+      var oldIfr = document.getElementById('sc');
+      var blank = document.createElement('iframe');
+      blank.id = 'sc';
+      blank.setAttribute('allow', 'autoplay');
+      blank.src = 'about:blank';
+      oldIfr.parentNode.replaceChild(blank, oldIfr);
+      playerBox.classList.add('hidden');
       totalTracks = 0;
       totalEl.textContent = '\u2013';
       idxEl.textContent = '\u2013';
@@ -758,7 +782,7 @@
     muted = !muted;
     applyMuteUI();
     applyVolume();
-    try { localStorage.setItem('skimmer.muted', muted ? '1' : '0'); } catch(e){}
+    try { sessionStorage.setItem('skimmer.muted', muted ? '1' : '0'); } catch(e){}
   });
 
   // ---- init ----
